@@ -12,6 +12,41 @@ This repository is designed to run on a laptop with OpenAI and Gemini credential
 
 Found a problem or want to chat about the project? Open an issue or join our [Discord server](https://discord.gg/vFvvdC3B)
 
+## What This Fork Tries To Change
+
+This fork is an experiment based on `schibsted/videofy_minimal`.
+
+The goal is not to rebuild the whole system from scratch. The goal is to keep the original article -> manuscript -> media matching -> voice -> render flow, while making the AI parts easier to swap and easier to run on a laptop.
+
+Compared to the original repo, this fork is trying to do the following:
+- keep the original orchestration and prompt-driven workflow as much as possible
+- make the LLM provider selectable per node instead of assuming a single provider everywhere
+- support OpenAI or Gemini for text-reasoning stages such as script generation, image description, asset placement, and image-prompt building
+- add AI image generation as a new explicit node in the pipeline instead of treating images as article-only inputs
+- support two image-generation paths: OpenAI images and Nano Banana
+- replace the old ElevenLabs dependency with Gemini TTS so the repo can run with `OPENAI_API_KEY` plus `GEMINI_API_KEY`
+- make the CMS friendlier for experimentation by exposing provider/model switching in the UI
+- improve local reliability on a laptop by cleaning up error handling, legacy project loading, and environment-specific issues
+
+In practical terms, this fork is moving the project from "minimal newsroom video generator" toward "local narrative/explainer video workflow with swappable AI nodes."
+
+## What We Tried Not To Change
+
+The main intention was to avoid rewriting the whole product logic.
+
+What we tried to preserve from the original repo:
+- the overall manuscript generation and processing pipeline
+- the fetch -> generate -> review -> process -> render shape of the workflow
+- the brand-driven configuration model
+- the existing prompt instructions used by the original manuscript and media-analysis stages
+- the local project-folder structure under `projects/<projectId>/`
+
+So the core idea of this fork is:
+- keep the original pipeline shape
+- add node-level model routing
+- add image generation as one more node
+- make the stack easier to test locally
+
 ## What It Does
 
 Videofy Minimal takes content from a source such as Reuters, AP, or a test web URL, builds a manuscript, matches media, generates voiceover, and renders a video.
