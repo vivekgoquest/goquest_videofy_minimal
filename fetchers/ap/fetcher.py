@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -20,8 +21,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+import certifi
+
 AP_CONTENT_BASE_URL = "https://api.ap.org/media/v/content"
 REQUEST_TIMEOUT_SECONDS = 45
+SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 
 class ApImportError(Exception):
@@ -94,7 +98,7 @@ def get_api_key() -> str:
 def _http_get(url: str, headers: dict[str, str], timeout: int) -> bytes:
     req = Request(url=url, headers=headers, method="GET")
     try:
-        with urlopen(req, timeout=timeout) as response:
+        with urlopen(req, timeout=timeout, context=SSL_CONTEXT) as response:
             return response.read()
     except HTTPError as exc:
         details = exc.read().decode("utf-8", errors="replace")[:600]
@@ -249,7 +253,7 @@ def _download_binary(url: str, target_file: Path, timeout: int, api_key: str) ->
         },
         method="GET",
     )
-    with urlopen(req, timeout=timeout) as response:
+    with urlopen(req, timeout=timeout, context=SSL_CONTEXT) as response:
         with tempfile.NamedTemporaryFile(delete=False, dir=target_file.parent) as tmp:
             while True:
                 chunk = response.read(64 * 1024)

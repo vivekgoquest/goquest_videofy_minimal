@@ -4,17 +4,18 @@ from pathlib import Path
 
 from api.asset_analysis import AssetAnalysisResult, AssetAnalysisService
 from api.config_resolver import ConfigResolver
+from api.image_generation_service import GeneratedImageAsset
 from api.llm_service import LLMService
 from api.pipeline import PipelineService
 from api.project_store import ProjectStore
 from api.settings import Settings
-from api.tts_service import ElevenLabsService
+from api.tts_service import GeminiTTSService
 
 
 def write_brand_config(config_root: Path) -> None:
     config_root.mkdir(parents=True, exist_ok=True)
     (config_root / "default.json").write_text(
-        '{"openai":{"manuscriptModel":"gpt-4o-mini","mediaModel":"gpt-4o"},"options":{"segmentPauseSeconds":0.4},"prompts":{"scriptPrompt":"Return JSON with lines."},"people":{"default":{"voice":"brand-voice-id","model_id":"eleven_turbo_v2_5"}},"player":{"defaultCameraMovements":["pan-left","zoom-out"]}}',
+        '{"openai":{"manuscriptModel":"gpt-4o-mini","mediaModel":"gpt-4o"},"audio":{"tts":"google"},"options":{"segmentPauseSeconds":0.4},"prompts":{"scriptPrompt":"Return JSON with lines."},"people":{"default":{"voice":"Kore","model_id":"gemini-2.5-pro-preview-tts"}},"player":{"defaultCameraMovements":["pan-left","zoom-out"]}}',
         encoding="utf-8",
     )
 
@@ -55,7 +56,7 @@ def test_generate_manuscript_uses_script_lines_from_article(tmp_path: Path):
         settings=settings,
         store=store,
         llm_service=LLMService(api_key="", model="gpt-4o-mini"),
-        tts_service=ElevenLabsService(
+        tts_service=GeminiTTSService(
             api_key="",
             voice_id="voice",
             ffprobe_bin="ffprobe",
@@ -137,7 +138,7 @@ def test_generate_recomputes_analysis_on_each_run(tmp_path: Path):
         settings=settings,
         store=store,
         llm_service=LLMService(api_key="", model="gpt-4o-mini"),
-        tts_service=ElevenLabsService(
+        tts_service=GeminiTTSService(
             api_key="",
             voice_id="voice",
             ffprobe_bin="ffprobe",
@@ -175,6 +176,7 @@ def test_generate_recomputes_analysis_on_each_run(tmp_path: Path):
 class _FakeAssetAnalysisService:
     def __init__(self, app_base_url: str):
         self._app_base_url = app_base_url
+        self.last_call: dict | None = None
 
     def analyze(
         self,
@@ -183,8 +185,18 @@ class _FakeAssetAnalysisService:
         input_assets: list,
         describe_prompt: str,
         placement_prompt: str,
-        media_model: str,
+        describe_provider: str,
+        describe_model: str,
+        placement_provider: str,
+        placement_model: str,
     ) -> AssetAnalysisResult:
+        self.last_call = {
+            "project_id": project_id,
+            "describe_provider": describe_provider,
+            "describe_model": describe_model,
+            "placement_provider": placement_provider,
+            "placement_model": placement_model,
+        }
         assert len(script_lines) == 2
         return AssetAnalysisResult(
             assets=[
@@ -226,6 +238,113 @@ class _FakeAssetAnalysisService:
         )
 
 
+class _FakeLLMService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, str]] = []
+
+    def summarize_into_lines(
+        self,
+        *,
+        text: str,
+        title: str,
+        system_prompt: str,
+        model_override: str | None = None,
+        provider: str = "openai",
+    ) -> list[str]:
+        self.calls.append(
+            {
+                "text": text,
+                "title": title,
+                "system_prompt": system_prompt,
+                "model_override": model_override or "",
+                "provider": provider,
+            }
+        )
+        return ["Line 1", "Line 2"]
+
+
+class _FakeImageGenerationService:
+    def __init__(self, app_base_url: str) -> None:
+        self._app_base_url = app_base_url
+
+    def generate_for_script_lines(
+        self,
+        project_id: str,
+        article,
+        script_lines: list[str],
+        resolved_config,
+    ) -> list[GeneratedImageAsset]:
+        generated_assets = [
+            GeneratedImageAsset(
+                asset_id="gen-001-01",
+                line_index=0,
+                rel_path="working/generated-images/seg-001-v01.png",
+                metadata_rel_path="working/generated-prompts/seg-001-v01.json",
+                url=f"{self._app_base_url}/projects/{project_id}/files/working/generated-images/seg-001-v01.png",
+                byline="AI generated",
+            ),
+            GeneratedImageAsset(
+                asset_id="gen-001-02",
+                line_index=0,
+                rel_path="working/generated-images/seg-001-v02.png",
+                metadata_rel_path="working/generated-prompts/seg-001-v02.json",
+                url=f"{self._app_base_url}/projects/{project_id}/files/working/generated-images/seg-001-v02.png",
+                byline="AI generated",
+            ),
+            GeneratedImageAsset(
+                asset_id="gen-002-01",
+                line_index=1,
+                rel_path="working/generated-images/seg-002-v01.png",
+                metadata_rel_path="working/generated-prompts/seg-002-v01.json",
+                url=f"{self._app_base_url}/projects/{project_id}/files/working/generated-images/seg-002-v01.png",
+                byline="AI generated",
+            ),
+        ]
+        return generated_assets
+
+
+class _FakeGeneratedAssetAnalysisService:
+    def __init__(self, app_base_url: str):
+        self._app_base_url = app_base_url
+
+    def analyze(
+        self,
+        project_id: str,
+        script_lines: list[str],
+        input_assets: list,
+        describe_prompt: str,
+        placement_prompt: str,
+        describe_provider: str,
+        describe_model: str,
+        placement_provider: str,
+        placement_model: str,
+    ) -> AssetAnalysisResult:
+        assets = []
+        for input_asset in input_assets:
+            assets.append(
+                {
+                    "asset_id": input_asset.asset_id,
+                    "type": "image",
+                    "rel_path": input_asset.rel_path,
+                    "url": input_asset.url,
+                    "description": input_asset.asset_id,
+                    "imageAsset": {
+                        "id": input_asset.rel_path,
+                        "size": {"width": 1080, "height": 1920},
+                    },
+                }
+            )
+
+        return AssetAnalysisResult(
+            assets=assets,
+            placement_asset_ids=[],
+            used_fallback_placement=False,
+            hotspot_provider="noop",
+            description_model="gemini-2.5-flash",
+            placement_model="gemini-2.5-flash",
+        )
+
+
 def test_generate_wires_video_scenes_into_segment_trims(tmp_path: Path):
     projects_root = tmp_path / "projects"
     config_root = tmp_path / "brands"
@@ -263,7 +382,7 @@ def test_generate_wires_video_scenes_into_segment_trims(tmp_path: Path):
         settings=settings,
         store=store,
         llm_service=LLMService(api_key="", model="gpt-4o-mini"),
-        tts_service=ElevenLabsService(
+        tts_service=GeminiTTSService(
             api_key="",
             voice_id="voice",
             ffprobe_bin="ffprobe",
@@ -282,3 +401,158 @@ def test_generate_wires_video_scenes_into_segment_trims(tmp_path: Path):
     assert first_segment_video.end_at == 3.0
     assert second_segment_video.start_from == 3.0
     assert second_segment_video.end_at == 5.0
+
+
+def test_generate_keeps_all_generated_variants_on_segment_when_preferred(tmp_path: Path):
+    projects_root = tmp_path / "projects"
+    config_root = tmp_path / "brands"
+    config_root.mkdir(parents=True, exist_ok=True)
+    (config_root / "default.json").write_text(
+        (
+            "{"
+            '"openai":{"manuscriptModel":"gpt-4o-mini","mediaModel":"gpt-4o"},'
+            '"audio":{"tts":"google"},'
+            '"prompts":{"scriptPrompt":"Return JSON with lines."},'
+            '"imageGeneration":{"enabled":true,"provider":"openai","variants":2,"preferGenerated":true,'
+            '"prompts":{"briefPrompt":"brief","openaiPromptBuilder":"builder","nanobananaPromptBuilder":"nano"}},'
+            '"people":{"default":{"voice":"Kore","model_id":"gemini-2.5-pro-preview-tts"}}'
+            "}"
+        ),
+        encoding="utf-8",
+    )
+
+    store = ProjectStore(projects_root)
+    project_id = "generated-variants"
+    store.ensure_layout(project_id)
+    for rel_path in [
+        "working/generated-images/seg-001-v01.png",
+        "working/generated-images/seg-001-v02.png",
+        "working/generated-images/seg-002-v01.png",
+    ]:
+        output_path = store.project_path(project_id) / rel_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"img")
+
+    store.save_json(
+        project_id,
+        "input/article.json",
+        {
+            "title": "Generated Variant Demo",
+            "byline": "Tester",
+            "pubdate": "2026-01-01T00:00:00Z",
+            "text": "Long text",
+            "script_lines": ["Line 1", "Line 2"],
+            "images": [],
+            "videos": [],
+        },
+    )
+
+    settings = Settings(
+        projects_root=projects_root,
+        config_root=config_root,
+        app_base_url="http://localhost:8001",
+    )
+
+    pipeline = PipelineService(
+        settings=settings,
+        store=store,
+        llm_service=LLMService(api_key="", model="gpt-4o-mini"),
+        tts_service=GeminiTTSService(
+            api_key="",
+            voice_id="voice",
+            ffprobe_bin="ffprobe",
+            ffmpeg_bin="ffmpeg",
+        ),
+        config_resolver=ConfigResolver(settings.config_root_abs),
+        asset_analysis_service=_FakeGeneratedAssetAnalysisService(settings.app_base_url),  # type: ignore[arg-type]
+        image_generation_service=_FakeImageGenerationService(settings.app_base_url),  # type: ignore[arg-type]
+    )
+
+    manuscript = pipeline.generate_manuscript(project_id)
+
+    assert [image.path for image in manuscript.segments[0].images] == [
+        "working/generated-images/seg-001-v01.png",
+        "working/generated-images/seg-001-v02.png",
+    ]
+    assert [image.path for image in manuscript.segments[1].images] == [
+        "working/generated-images/seg-002-v01.png",
+    ]
+
+
+def test_generate_routes_llm_nodes_from_runtime_override(tmp_path: Path):
+    projects_root = tmp_path / "projects"
+    config_root = tmp_path / "brands"
+    config_root.mkdir(parents=True, exist_ok=True)
+    (config_root / "default.json").write_text(
+        (
+            '{'
+            '"openai":{"manuscriptModel":"gpt-4o-mini","mediaModel":"gpt-4.1-mini"},'
+            '"gemini":{"manuscriptModel":"gemini-2.5-flash","mediaModel":"gemini-2.5-pro","promptBuilderModel":"gemini-2.5-flash"},'
+            '"audio":{"tts":"google"},'
+            '"prompts":{"scriptPrompt":"Return JSON with lines.","placementPrompt":"place","describeImagesPrompt":"describe"},'
+            '"people":{"default":{"voice":"Kore","model_id":"gemini-2.5-pro-preview-tts"}}'
+            '}'
+        ),
+        encoding="utf-8",
+    )
+
+    store = ProjectStore(projects_root)
+    project_id = "llm-routing"
+    store.ensure_layout(project_id)
+    image_path = store.project_path(project_id) / "input" / "images" / "a.jpg"
+    image_path.write_bytes(b"jpg")
+
+    store.save_json(
+        project_id,
+        "input/article.json",
+        {
+            "title": "Routing Demo",
+            "byline": "Tester",
+            "pubdate": "2026-01-01T00:00:00Z",
+            "text": "Long text",
+            "images": [{"path": "images/a.jpg"}],
+            "videos": [],
+        },
+    )
+
+    settings = Settings(
+        projects_root=projects_root,
+        config_root=config_root,
+        app_base_url="http://localhost:8001",
+    )
+    fake_llm = _FakeLLMService()
+    fake_analysis = _FakeAssetAnalysisService(settings.app_base_url)
+    pipeline = PipelineService(
+        settings=settings,
+        store=store,
+        llm_service=fake_llm,  # type: ignore[arg-type]
+        tts_service=GeminiTTSService(
+            api_key="",
+            voice_id="voice",
+            ffprobe_bin="ffprobe",
+            ffmpeg_bin="ffmpeg",
+        ),
+        config_resolver=ConfigResolver(settings.config_root_abs),
+        asset_analysis_service=fake_analysis,  # type: ignore[arg-type]
+    )
+
+    manuscript = pipeline.generate_manuscript(
+        project_id,
+        llm_override={
+            "default_provider": "gemini",
+            "nodes": {
+                "script_generation": {"provider": "gemini", "model": "gemini-2.5-pro"},
+                "image_description": {"provider": "openai", "model": "gpt-4.1-mini"},
+                "asset_placement": {"provider": "gemini", "model": "gemini-2.5-flash"},
+            },
+        },  # type: ignore[arg-type]
+    )
+
+    assert len(manuscript.segments) == 2
+    assert fake_llm.calls[0]["provider"] == "gemini"
+    assert fake_llm.calls[0]["model_override"] == "gemini-2.5-pro"
+    assert fake_analysis.last_call is not None
+    assert fake_analysis.last_call["describe_provider"] == "openai"
+    assert fake_analysis.last_call["describe_model"] == "gpt-4.1-mini"
+    assert fake_analysis.last_call["placement_provider"] == "gemini"
+    assert fake_analysis.last_call["placement_model"] == "gemini-2.5-flash"

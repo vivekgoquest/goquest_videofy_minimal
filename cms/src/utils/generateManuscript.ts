@@ -4,6 +4,7 @@ import type { Config, ManuscriptType, MediaAssetType } from "@videofy/types";
 import { manuscriptSchema } from "@videofy/types";
 import sharp from "sharp";
 import { prepareManuscript } from "./prepareManuscript";
+import { readBackendErrorMessage } from "./readBackendErrorMessage";
 import { getDataApiUrl } from "@/lib/backend";
 
 const FALLBACK_IMAGE_SIZE = { width: 1080, height: 1080 };
@@ -308,6 +309,8 @@ export const generateManuscript = async (
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         script_prompt: config.manuscript.script_prompt,
+        llm: config.llm,
+        image_generation: config.image_generation,
       }),
       cache: "no-store",
       signal: abortController.signal,
@@ -324,7 +327,7 @@ export const generateManuscript = async (
   }
 
   if (!response.ok) {
-    const responseBody = await response.text();
+    const responseBody = await readBackendErrorMessage(response);
     console.error(
       `[cms.generate] Generation request failed for project '${projectId}': ${responseBody}`
     );

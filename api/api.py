@@ -97,10 +97,14 @@ def generate_project(
         manuscript = state.pipeline.generate_manuscript(
             project_id,
             script_prompt_override=payload.script_prompt,
+            llm_override=payload.llm,
+            image_generation_override=payload.image_generation,
         )
     except ProjectStoreError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ConfigResolverError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     logger.info(
@@ -127,6 +131,8 @@ def process_project(
     except ProjectStoreError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ConfigResolverError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return GenerationResponse(

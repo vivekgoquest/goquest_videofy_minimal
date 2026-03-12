@@ -27,15 +27,23 @@ export const GET = async (
   }
 
   try {
-    const imagesDir = join(
-      process.cwd(),
-      "..",
-      "projects",
-      projectId,
-      "input",
-      "images"
-    );
-    const files = await readdir(imagesDir).catch(() => []);
+    const projectRoot = join(process.cwd(), "..", "projects", projectId);
+    const folders = [
+      { relDir: join("input", "images"), labelPrefix: "input/images" },
+      {
+        relDir: join("working", "generated-images"),
+        labelPrefix: "working/generated-images",
+      },
+    ];
+    const files = (
+      await Promise.all(
+        folders.map(async ({ relDir, labelPrefix }) => {
+          const absoluteDir = join(projectRoot, relDir);
+          const entries = await readdir(absoluteDir).catch(() => []);
+          return entries.map((entry) => `${labelPrefix}/${entry}`);
+        })
+      )
+    ).flat();
     return NextResponse.json({ files });
   } catch (error) {
     console.error("Error listing local assets:", error);

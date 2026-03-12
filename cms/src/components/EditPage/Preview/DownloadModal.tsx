@@ -294,7 +294,7 @@ const DownloadModal: FC<Props> = ({ open, setOpen }) => {
           )}
         </Flex>
 
-        {state.error && <Alert type="error" message={`Error: ${state.error}`} />}
+        {state.error && <Alert type="error" title={`Error: ${state.error}`} />}
       </Form>
     </Modal>
   );

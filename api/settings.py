@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,8 +21,14 @@ class Settings(BaseSettings):
 
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
-
-    elevenlabs_api_key: str = ""
+    google_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "GOOGLE_API_KEY",
+            "GEMINI_API_KEY",
+            "NANOBANANA_API_KEY",
+        ),
+    )
 
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
@@ -41,6 +47,14 @@ class Settings(BaseSettings):
     @property
     def cors_allow_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_allow_origins.split(",") if origin.strip()]
+
+    @property
+    def gemini_api_key(self) -> str:
+        return self.google_api_key
+
+    @property
+    def nanobanana_api_key(self) -> str:
+        return self.google_api_key
 
 
 def get_settings() -> Settings:

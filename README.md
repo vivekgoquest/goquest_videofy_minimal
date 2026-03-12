@@ -8,7 +8,7 @@ It fetches article content, generates a short manuscript, matches visuals, produ
 
 Here is an example video from one of our brands: [example_video_e24.mp4](./example_video_e24.mp4)
 
-This repository is designed to run on a laptop with only OpenAI and ElevenLabs credentials. It keeps the core workflow, but leaves out most of the internal integrations and infrastructure used in Schibsted's full Videofy setup.
+This repository is designed to run on a laptop with OpenAI and Gemini credentials. It keeps the core workflow, but leaves out most of the internal integrations and infrastructure used in Schibsted's full Videofy setup.
 
 Found a problem or want to chat about the project? Open an issue or join our [Discord server](https://discord.gg/vFvvdC3B)
 
@@ -31,7 +31,7 @@ flowchart LR
   CMS --> Preview[Preview player<br/>Remotion]
   CMS --> Render[Local renderer]
 
-  API --> AI[OpenAI / ElevenLabs]
+  API --> AI[OpenAI / Gemini]
   API --> Projects[Project files<br/>projects/<projectId>/]
   Fetchers --> Projects
 
@@ -62,7 +62,7 @@ cp .env.example .env
 
 Add your API credentials in `.env`:
 - `OPENAI_API_KEY`
-- `ELEVENLABS_API_KEY`
+- `GEMINI_API_KEY` or `GOOGLE_API_KEY`
 
 ### 3. Install Project Dependencies
 
@@ -95,7 +95,7 @@ To run the CMS and API in containers instead:
 docker compose up --build
 ```
 
-Docker Compose reads the same local `.env` file for values such as `OPENAI_API_KEY` and `ELEVENLABS_API_KEY`.
+Docker Compose reads the same local `.env` file for values such as `OPENAI_API_KEY` and `GEMINI_API_KEY`.
 
 Open:
 - CMS: `http://127.0.0.1:3000`

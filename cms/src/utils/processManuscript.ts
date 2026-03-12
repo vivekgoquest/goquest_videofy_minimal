@@ -8,6 +8,7 @@ import type {
 } from "@videofy/types";
 import { processedManuscriptSchema } from "@videofy/types";
 import { getDataApiUrl } from "@/lib/backend";
+import { readBackendErrorMessage } from "./readBackendErrorMessage";
 
 const FALLBACK_IMAGE_SIZE = {
   width: 1080,
@@ -445,7 +446,7 @@ export const processManuscript = async ({
   }
 
   if (!response.ok) {
-    const responseBody = await response.text();
+    const responseBody = await readBackendErrorMessage(response);
     console.error(
       `[cms.process] Process request failed for project '${projectId}': ${responseBody}`
     );

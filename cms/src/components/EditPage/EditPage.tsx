@@ -5,7 +5,7 @@ import { useReactive } from "ahooks";
 import { useParams } from "next/navigation";
 import { Tab, useGlobalState } from "@/state/globalState";
 import { useRouter } from "next/navigation";
-import { Alert, App, Button, Flex, Form, Spin, Tooltip, Typography } from "antd";
+import { Alert, App, Button, Empty, Flex, Form, Spin, Tooltip, Typography } from "antd";
 import { SettingOutlined, ShareAltOutlined } from "@ant-design/icons";
 import PreviewOutput from "./Preview/PreviewOutput";
 import SortableTabs from "../SortableTabs";
@@ -142,7 +142,7 @@ const EditPage: FC = () => {
         {state.loadError ? (
           <Alert
             type="error"
-            message="Failed to load project"
+            title="Failed to load project"
             description={state.loadError}
             action={
               <Button type="primary" onClick={() => router.replace("/")}>
@@ -214,54 +214,65 @@ const EditPage: FC = () => {
           </div>
           <div className="w-full xl:max-w-[800px] xl:grow">
             {!state.editTheme ? (
-              <Form.List name={["tabs"]}>
-                {(tabItems, { move }) => {
-                  return (
-                    <SortableTabs
-                      allowAdd
-                      onAdd={() => {
-                        state.openArticleModal = true;
-                      }}
-                      activeKey={state.selectedTab}
-                      onChange={(value) => {
-                        state.selectedTab = value;
-                      }}
-                      onReorder={(from, to) => {
-                        move(from, to);
-                      }}
-                      items={tabItems.map((t, index) => {
-                        const tab = form.getFieldValue(["tabs", t.name]);
-                        return {
-                          key: tab.manuscript.meta.uniqueId!,
-                          label: (
-                            <Flex align="center">
-                              <Typography.Paragraph
-                                ellipsis={{
-                                  tooltip: tab.manuscript.meta.title,
-                                }}
-                                style={{
-                                  maxWidth: 250,
-                                  marginBottom: 0,
-                                  userSelect: "none",
-                                }}
-                              >
-                                {tab.manuscript.meta.title}
-                              </Typography.Paragraph>
-                            </Flex>
-                          ),
-                          children: (
-                            <SegmentList
-                              index={t.name}
-                              manuscript={tab.manuscript}
-                            />
-                          ),
-                          forceRender: true,
-                        };
-                      })}
-                    />
-                  );
-                }}
-              </Form.List>
+              tabs.length === 0 ? (
+                <Empty
+                  description="No manuscript has been generated for this project yet."
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                >
+                  <Button type="primary" onClick={() => (state.openArticleModal = true)}>
+                    Add article
+                  </Button>
+                </Empty>
+              ) : (
+                <Form.List name={["tabs"]}>
+                  {(tabItems, { move }) => {
+                    return (
+                      <SortableTabs
+                        allowAdd
+                        onAdd={() => {
+                          state.openArticleModal = true;
+                        }}
+                        activeKey={state.selectedTab}
+                        onChange={(value) => {
+                          state.selectedTab = value;
+                        }}
+                        onReorder={(from, to) => {
+                          move(from, to);
+                        }}
+                        items={tabItems.map((t) => {
+                          const tab = form.getFieldValue(["tabs", t.name]);
+                          return {
+                            key: tab.manuscript.meta.uniqueId!,
+                            label: (
+                              <Flex align="center">
+                                <Typography.Paragraph
+                                  ellipsis={{
+                                    tooltip: tab.manuscript.meta.title,
+                                  }}
+                                  style={{
+                                    maxWidth: 250,
+                                    marginBottom: 0,
+                                    userSelect: "none",
+                                  }}
+                                >
+                                  {tab.manuscript.meta.title}
+                                </Typography.Paragraph>
+                              </Flex>
+                            ),
+                            children: (
+                              <SegmentList
+                                index={t.name}
+                                manuscript={tab.manuscript}
+                              />
+                            ),
+                            forceRender: true,
+                          };
+                        })}
+                      />
+                    );
+                  }}
+                </Form.List>
+              )
             ) : (
               <Form.Item name="config" noStyle>
                 <EditConfig />

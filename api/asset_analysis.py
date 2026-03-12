@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from openai import OpenAI
 from pydantic import BaseModel
 
+from .llm_service import LLMService
 from .project_store import ProjectStore
 
 logger = logging.getLogger(__name__)
@@ -173,11 +173,16 @@ class AssetAnalysisService:
         openai_api_key: str,
         ffmpeg_bin: str,
         ffprobe_bin: str,
+        google_api_key: str = "",
     ):
         self._store = store
         self._ffmpeg_bin = ffmpeg_bin
         self._ffprobe_bin = ffprobe_bin
-        self._client = OpenAI(api_key=openai_api_key) if openai_api_key else None
+        self._llm = LLMService(
+            api_key=openai_api_key,
+            model="gpt-4o-mini",
+            google_api_key=google_api_key,
+        )
 
     def analyze(
         self,
@@ -186,7 +191,10 @@ class AssetAnalysisService:
         input_assets: list[AnalysisInputAsset],
         describe_prompt: str,
         placement_prompt: str,
-        media_model: str,
+        describe_provider: str,
+        describe_model: str,
+        placement_provider: str,
+        placement_model: str,
     ) -> AssetAnalysisResult:
         logger.info(
             "[asset-analysis:%s] Started (script_lines=%d, input_assets=%d)",
@@ -222,7 +230,8 @@ class AssetAnalysisService:
             analysis_dir=analysis_dir,
             assets=analyzed_assets,
             describe_prompt=describe_prompt,
-            model=media_model,
+            provider=describe_provider,
+            model=describe_model,
             )
         )
         logger.info(
@@ -252,7 +261,8 @@ class AssetAnalysisService:
             assets=analyzed_assets,
             script_lines=script_lines,
             placement_prompt=placement_prompt,
-            model=media_model,
+            provider=placement_provider,
+            model=placement_model,
         )
         logger.info(
             "[asset-analysis:%s] Step 3/4: Placement generated (fallback=%s)",
@@ -303,8 +313,10 @@ class AssetAnalysisService:
                     [asset for asset in analyzed_assets if asset.get("type") == "video"]
                 ),
                 "usedFallbackPlacement": used_fallback_placement,
-                "descriptionModel": descriptions_payload.get("model", media_model),
-                "placementModel": placements_payload.get("model", media_model),
+                "descriptionProvider": describe_provider,
+                "descriptionModel": descriptions_payload.get("model", describe_model),
+                "placementProvider": placement_provider,
+                "placementModel": placements_payload.get("model", placement_model),
                 "hotspotProvider": hotspot_provider,
                 "timingsMs": {
                     "catalog": _ms(t0, t1),
@@ -326,8 +338,8 @@ class AssetAnalysisService:
             placement_asset_ids=placement_asset_ids,
             used_fallback_placement=used_fallback_placement,
             hotspot_provider=hotspot_provider,
-            description_model=str(descriptions_payload.get("model", media_model)),
-            placement_model=str(placements_payload.get("model", media_model)),
+            description_model=str(descriptions_payload.get("model", describe_model)),
+            placement_model=str(placements_payload.get("model", placement_model)),
         )
 
     def _write_catalog(
@@ -512,6 +524,7 @@ class AssetAnalysisService:
         analysis_dir: Path,
         assets: list[dict[str, Any]],
         describe_prompt: str,
+        provider: str,
         model: str,
     ) -> tuple[dict[str, Any], dict[str, str], dict[str, dict[str, Any]]]:
         target_path = analysis_dir / "descriptions.json"
@@ -520,8 +533,9 @@ class AssetAnalysisService:
         video_scenes_by_asset: dict[str, dict[str, Any]] = {}
 
         logger.info(
-            "Describing %d assets with model '%s'",
+            "Describing %d assets with provider '%s' model '%s'",
             len(assets),
+            provider,
             model,
         )
         for index, asset in enumerate(assets, start=1):
@@ -537,6 +551,7 @@ class AssetAnalysisService:
                 scenes = self._describe_video_scenes(
                     asset=asset,
                     describe_prompt=describe_prompt,
+                    provider=provider,
                     model=model,
                 )
                 if scenes:
@@ -558,9 +573,10 @@ class AssetAnalysisService:
                 description = self._describe_single_asset(
                     asset=asset,
                     describe_prompt=describe_prompt,
+                    provider=provider,
                     model=model,
                 )
-            status = "ok" if self._client and describe_prompt else "fallback"
+            status = "ok" if describe_prompt else "fallback"
             payload_assets[asset_id] = {
                 "description": description,
                 "status": status,
@@ -570,6 +586,7 @@ class AssetAnalysisService:
 
         payload = {
             "version": 1,
+            "provider": provider,
             "model": model,
             "createdAt": _now_iso(),
             "assets": payload_assets,
@@ -579,6 +596,7 @@ class AssetAnalysisService:
             analysis_dir / "video_scenes.json",
             {
                 "version": 1,
+                "provider": provider,
                 "model": model,
                 "createdAt": _now_iso(),
                 "assets": video_scenes_by_asset,
@@ -590,6 +608,7 @@ class AssetAnalysisService:
         self,
         asset: dict[str, Any],
         describe_prompt: str,
+        provider: str,
         model: str,
     ) -> list[dict[str, Any]]:
         asset_id = str(asset.get("asset_id", "video"))
@@ -648,6 +667,7 @@ class AssetAnalysisService:
                 image_path=image_path,
                 fallback_asset=asset,
                 describe_prompt=describe_prompt,
+                provider=provider,
                 model=model,
             )
             if not description.strip():
@@ -672,47 +692,39 @@ class AssetAnalysisService:
         image_path: Path | None,
         fallback_asset: dict[str, Any],
         describe_prompt: str,
+        provider: str,
         model: str,
     ) -> str:
-        if self._client is None or not describe_prompt:
+        if not describe_prompt:
             return _fallback_description(fallback_asset)
         if image_path is None or not image_path.exists():
             return _fallback_description(fallback_asset)
         try:
             logger.info(
-                "[asset-analysis] Requesting description for asset %s with model '%s'",
+                "[asset-analysis] Requesting description for asset %s with provider '%s' model '%s'",
                 fallback_asset.get("asset_id"),
+                provider,
                 model,
             )
-            data_url = _to_data_url(image_path)
-            response = self._client.responses.parse(
+            parsed = self._llm.parse_structured_image(
+                provider=provider,
                 model=model,
-                input=[
-                    {"role": "system", "content": describe_prompt},
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": json.dumps(
-                                    {
-                                        "asset_id": fallback_asset.get("asset_id"),
-                                        "type": fallback_asset.get("type"),
-                                        "byline": fallback_asset.get("byline"),
-                                        "path": fallback_asset.get("rel_path"),
-                                    },
-                                    ensure_ascii=False,
-                                ),
-                            },
-                            {"type": "input_image", "image_url": data_url},
-                        ],
-                    },
-                ],
-                text_format=DescriptionResult,
+                system_prompt=describe_prompt,
+                payload={
+                    "asset_id": fallback_asset.get("asset_id"),
+                    "type": fallback_asset.get("type"),
+                    "byline": fallback_asset.get("byline"),
+                    "path": fallback_asset.get("rel_path"),
+                },
+                image_path=image_path,
+                response_model=DescriptionResult,
                 temperature=0.2,
                 max_output_tokens=180,
+                missing_key_message=(
+                    f"{'OPENAI_API_KEY' if provider == 'openai' else 'GEMINI_API_KEY or GOOGLE_API_KEY'} "
+                    "is required to describe assets with the selected provider"
+                ),
             )
-            parsed = response.output_parsed
             if parsed and parsed.description.strip():
                 logger.info(
                     "[asset-analysis] Description completed for asset %s",
@@ -731,9 +743,10 @@ class AssetAnalysisService:
         self,
         asset: dict[str, Any],
         describe_prompt: str,
+        provider: str,
         model: str,
     ) -> str:
-        if self._client is None or not describe_prompt:
+        if not describe_prompt:
             return _fallback_description(asset)
 
         image_path: Path | None = None
@@ -750,6 +763,7 @@ class AssetAnalysisService:
             image_path=image_path,
             fallback_asset=asset,
             describe_prompt=describe_prompt,
+            provider=provider,
             model=model,
         )
 
@@ -759,6 +773,7 @@ class AssetAnalysisService:
         assets: list[dict[str, Any]],
         script_lines: list[str],
         placement_prompt: str,
+        provider: str,
         model: str,
     ) -> tuple[dict[str, Any], list[str], bool]:
         target_path = analysis_dir / "placements.json"
@@ -773,15 +788,16 @@ class AssetAnalysisService:
             selected_ids = []
             if script_lines:
                 validation_errors.append("no-candidate-assets")
-        elif self._client is None or not placement_prompt:
+        elif not placement_prompt:
             used_fallback = True
             selected_ids = self._fallback_asset_assignment(script_lines, candidate_ids)
             validation_errors.append("placement-disabled")
         else:
-            model_ids = self._openai_assign_assets_to_script_lines(
+            model_ids = self._assign_assets_with_llm(
                 script_lines=script_lines,
                 candidate_assets=candidate_assets,
                 placement_prompt=placement_prompt,
+                provider=provider,
                 model=model,
             )
             selected_ids, validation_errors = self._validate_placement(
@@ -795,6 +811,7 @@ class AssetAnalysisService:
 
         payload = {
             "version": 1,
+            "provider": provider,
             "model": model,
             "createdAt": _now_iso(),
             "usedFallback": used_fallback,
@@ -824,57 +841,51 @@ class AssetAnalysisService:
             return [], errors
         return selected_ids, errors
 
-    def _openai_assign_assets_to_script_lines(
+    def _assign_assets_with_llm(
         self,
         script_lines: list[str],
         candidate_assets: list[dict[str, Any]],
         placement_prompt: str,
+        provider: str,
         model: str,
     ) -> list[str]:
-        if self._client is None:
-            return []
         try:
             logger.info(
-                "[asset-analysis] Requesting placement with model '%s' (lines=%d, candidates=%d)",
+                "[asset-analysis] Requesting placement with provider '%s' model '%s' (lines=%d, candidates=%d)",
+                provider,
                 model,
                 len(script_lines),
                 len(candidate_assets),
             )
-            response = self._client.responses.parse(
+            parsed = self._llm.parse_structured_payload(
+                provider=provider,
                 model=model,
-                input=[
-                    {"role": "system", "content": placement_prompt},
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            {
-                                "lines": [
-                                    {"line_id": idx + 1, "text": text}
-                                    for idx, text in enumerate(script_lines)
-                                ],
-                                "assets": [
-                                    {
-                                        "asset_id": asset["asset_id"],
-                                        "type": asset["type"],
-                                        "description": asset.get("description", ""),
-                                        "scenes": asset.get("videoScenes", []),
-                                        "byline": asset.get("byline"),
-                                        "path": asset.get("rel_path"),
-                                    }
-                                    for asset in candidate_assets
-                                ],
-                            },
-                            ensure_ascii=False,
-                        ),
-                    },
-                ],
-                text_format=PlacementResult,
+                system_prompt=placement_prompt,
+                payload={
+                    "lines": [
+                        {"line_id": idx + 1, "text": text}
+                        for idx, text in enumerate(script_lines)
+                    ],
+                    "assets": [
+                        {
+                            "asset_id": asset["asset_id"],
+                            "type": asset["type"],
+                            "description": asset.get("description", ""),
+                            "scenes": asset.get("videoScenes", []),
+                            "byline": asset.get("byline"),
+                            "path": asset.get("rel_path"),
+                        }
+                        for asset in candidate_assets
+                    ],
+                },
+                response_model=PlacementResult,
                 temperature=0.2,
                 max_output_tokens=300,
+                missing_key_message=(
+                    f"{'OPENAI_API_KEY' if provider == 'openai' else 'GEMINI_API_KEY or GOOGLE_API_KEY'} "
+                    "is required to assign assets with the selected provider"
+                ),
             )
-            parsed = response.output_parsed
-            if parsed is None:
-                return []
             selected_ids = [
                 asset_id.strip()
                 for asset_id in parsed.asset_ids
@@ -886,7 +897,7 @@ class AssetAnalysisService:
             )
             return selected_ids
         except Exception as exc:
-            logger.warning("Placement with OpenAI failed: %s", exc)
+            logger.warning("Placement with %s failed: %s", provider, exc)
             return []
 
     def _fallback_asset_assignment(

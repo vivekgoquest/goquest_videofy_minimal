@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -20,9 +21,12 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
 
+import certifi
+
 REUTERS_AUTH_URL = "https://auth.thomsonreuters.com/oauth/token"
 REUTERS_GRAPHQL_URL = "https://api.reutersconnect.com/content/graphql"
 REQUEST_TIMEOUT_SECONDS = 45
+SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 
 class ReutersImportError(Exception):
@@ -117,7 +121,7 @@ def _http_json(
     req = Request(url=url, data=request_data, headers=request_headers, method="POST")
 
     try:
-        with urlopen(req, timeout=timeout) as response:
+        with urlopen(req, timeout=timeout, context=SSL_CONTEXT) as response:
             body = response.read().decode("utf-8")
             parsed = json.loads(body)
             if not isinstance(parsed, dict):
@@ -308,7 +312,7 @@ def _download_binary(url: str, target_file: Path, timeout: int) -> None:
         headers={"User-Agent": "videofy-minimal-fetch-reuters/1.0"},
         method="GET",
     )
-    with urlopen(req, timeout=timeout) as response:
+    with urlopen(req, timeout=timeout, context=SSL_CONTEXT) as response:
         with tempfile.NamedTemporaryFile(delete=False, dir=target_file.parent) as tmp:
             while True:
                 chunk = response.read(64 * 1024)

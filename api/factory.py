@@ -11,11 +11,12 @@ from fastapi.staticfiles import StaticFiles
 from .api import AppState, create_files_router, router
 from .asset_analysis import AssetAnalysisService
 from .config_resolver import ConfigResolver
+from .image_generation_service import ImageGenerationService
 from .llm_service import LLMService
 from .pipeline import PipelineService
 from .project_store import ProjectStore
 from .settings import Settings, get_settings
-from .tts_service import ElevenLabsService
+from .tts_service import GeminiTTSService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -25,9 +26,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     store = ProjectStore(settings.projects_root_abs)
     resolver = ConfigResolver(settings.config_root_abs)
-    llm = LLMService(api_key=settings.openai_api_key, model=settings.openai_model)
-    tts = ElevenLabsService(
-        api_key=settings.elevenlabs_api_key,
+    llm = LLMService(
+        api_key=settings.openai_api_key,
+        model=settings.openai_model,
+        google_api_key=settings.gemini_api_key,
+    )
+    tts = GeminiTTSService(
+        api_key=settings.gemini_api_key,
         voice_id="",
         ffprobe_bin=settings.ffprobe_bin,
         ffmpeg_bin=settings.ffmpeg_bin,
@@ -37,6 +42,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openai_api_key=settings.openai_api_key,
         ffmpeg_bin=settings.ffmpeg_bin,
         ffprobe_bin=settings.ffprobe_bin,
+        google_api_key=settings.gemini_api_key,
+    )
+    ai_image_generation = ImageGenerationService(
+        settings=settings,
+        store=store,
     )
 
     pipeline = PipelineService(
@@ -46,6 +56,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tts_service=tts,
         config_resolver=resolver,
         asset_analysis_service=asset_analysis,
+        image_generation_service=ai_image_generation,
     )
 
     app_state = AppState(

@@ -145,8 +145,60 @@ class Manuscript(BaseModel):
     media: list[MediaAssetImage | MediaAssetVideo] | None = None
 
 
+class GenerateOpenAIImageOverride(BaseModel):
+    model: str | None = None
+    size: str | None = None
+    quality: str | None = None
+    background: str | None = None
+
+
+class GenerateNanobananaImageOverride(BaseModel):
+    model: str | None = None
+    aspect_ratio: str | None = None
+    thinking_budget: str | None = None
+
+
+class GenerateImagePromptOverride(BaseModel):
+    brief_prompt: str | None = None
+    openai_prompt_builder: str | None = None
+    nanobanana_prompt_builder: str | None = None
+
+
+class GenerateLLMNodeOverride(BaseModel):
+    provider: Literal["openai", "gemini"] | None = None
+    model: str | None = None
+
+
+class GenerateLLMNodesOverride(BaseModel):
+    script_generation: GenerateLLMNodeOverride | None = None
+    image_description: GenerateLLMNodeOverride | None = None
+    asset_placement: GenerateLLMNodeOverride | None = None
+    image_prompt_builder: GenerateLLMNodeOverride | None = None
+
+
+class GenerateLLMOverride(BaseModel):
+    default_provider: Literal["openai", "gemini"] | None = None
+    nodes: GenerateLLMNodesOverride | None = None
+
+
+class GenerateImageOverride(BaseModel):
+    enabled: bool | None = None
+    provider: Literal["openai", "nanobanana"] | None = None
+    prompt_builder_model: str | None = None
+    variants: int | None = None
+    prefer_generated: bool | None = None
+    prompts: GenerateImagePromptOverride | None = None
+    openai: GenerateOpenAIImageOverride | None = None
+    nanobanana: GenerateNanobananaImageOverride | None = None
+
+
 class GenerateRequest(BaseModel):
     script_prompt: str | None = None
+    llm: GenerateLLMOverride | None = None
+    image_generation: GenerateImageOverride | None = None
+
+
+GenerateImageGenerationOverride = GenerateImageOverride
 
 
 class ProcessRequest(BaseModel):

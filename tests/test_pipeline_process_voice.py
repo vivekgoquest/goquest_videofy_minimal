@@ -20,7 +20,7 @@ class FakeTTSService:
         text: str,
         output_mp3: Path,
         voice_id: str | None = None,
-        model_id: str = "eleven_turbo_v2_5",
+        model_id: str = "gemini-2.5-pro-preview-tts",
         voice_settings: dict | None = None,
     ) -> None:
         self.calls.append(
@@ -53,11 +53,12 @@ def write_brand_config(config_root: Path, *, segment_pause_seconds: float) -> No
     (config_root / "default.json").write_text(
         (
             '{"openai":{"manuscriptModel":"gpt-4o-mini","mediaModel":"gpt-4o"},'
+            '"audio":{"tts":"google"},'
             '"options":{"segmentPauseSeconds":'
             f"{segment_pause_seconds}"
             '},'
             '"prompts":{"scriptPrompt":"Return JSON with lines."},'
-            '"people":{"default":{"voice":"brand-voice-id","model_id":"eleven_turbo_v2_5",'
+            '"people":{"default":{"voice":"Kore","model_id":"gemini-2.5-pro-preview-tts",'
             '"stability":1,"similarity_boost":1,"style":0,"use_speaker_boost":true}}}'
         ),
         encoding="utf-8",
@@ -115,8 +116,8 @@ def test_pipeline_process_uses_brand_voice_and_settings(tmp_path: Path):
     pipeline.process_manuscript(project_id, manuscript)
 
     assert len(fake_tts.calls) == 1
-    assert fake_tts.calls[0]["voice_id"] == "brand-voice-id"
-    assert fake_tts.calls[0]["model_id"] == "eleven_turbo_v2_5"
+    assert fake_tts.calls[0]["voice_id"] == "Kore"
+    assert fake_tts.calls[0]["model_id"] == "gemini-2.5-pro-preview-tts"
     assert fake_tts.calls[0]["voice_settings"]["stability"] == 1
     assert fake_tts.calls[0]["voice_settings"]["similarity_boost"] == 1
     assert fake_tts.calls[0]["voice_settings"]["style"] == 0

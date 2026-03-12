@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { appConfigSchema, manuscriptSchema } from "@videofy/types";
 import { z } from "zod";
-import { cmsGenerationPath, listProjectIds, readJson, writeJson } from "@/lib/projectFiles";
+import {
+  GenerationManifest,
+  cmsGenerationPath,
+  generationManifestPath,
+  listProjectIds,
+  readJson,
+  writeJson,
+} from "@/lib/projectFiles";
+import { resolveConfigForProject } from "@/lib/configResolver";
 
 const projectIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 
@@ -28,6 +36,21 @@ type GenerationRecord = {
   createdDate: string;
   updatedAt: string;
 };
+
+const manifestSchema = z.object({
+  projectId: z.string().min(1),
+  brandId: z.string().min(1),
+  promptPack: z.string().min(1),
+  voicePack: z.string().min(1),
+  options: z
+    .object({
+      orientationDefault: z.enum(["vertical", "horizontal"]).optional(),
+      segmentPauseSeconds: z.number().optional(),
+    })
+    .optional(),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+});
 
 const postBodySchema = z.object({
   projectId: projectIdSchema.optional(),
@@ -67,6 +90,37 @@ function normalizeId(rawId: string): string {
   }
 
   return decodedId;
+}
+
+async function readManifest(projectId: string): Promise<GenerationManifest | null> {
+  const raw = await readJson<unknown>(generationManifestPath(projectId), null);
+  const parsed = manifestSchema.safeParse(raw);
+  if (!parsed.success) {
+    return null;
+  }
+  return parsed.data;
+}
+
+async function buildFallbackGeneration(projectId: string): Promise<GenerationRecord | null> {
+  const manifest = await readManifest(projectId);
+  if (!manifest) {
+    return null;
+  }
+
+  const config = await resolveConfigForProject(projectId, manifest);
+  return {
+    id: projectId,
+    projectId,
+    data: [],
+    config,
+    brandId: manifest.brandId,
+    project: {
+      id: projectId,
+      name: projectId,
+    },
+    createdDate: manifest.createdAt,
+    updatedAt: manifest.updatedAt,
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -112,10 +166,11 @@ export async function GET(req: NextRequest) {
 
   try {
     const projectId = normalizeId(id);
-    const generation = await readJson<GenerationRecord | null>(
+    const storedGeneration = await readJson<GenerationRecord | null>(
       cmsGenerationPath(projectId),
       null
     );
+    const generation = storedGeneration || (await buildFallbackGeneration(projectId));
 
     if (!generation) {
       return NextResponse.json({ error: "Generation not found" }, { status: 404 });
@@ -135,10 +190,11 @@ export async function PUT(req: NextRequest) {
     const body = putBodySchema.parse(await req.json());
     const projectId = normalizeId(body.id);
 
-    const existing = await readJson<GenerationRecord | null>(
+    const storedGeneration = await readJson<GenerationRecord | null>(
       cmsGenerationPath(projectId),
       null
     );
+    const existing = storedGeneration || (await buildFallbackGeneration(projectId));
 
     if (!existing) {
       const knownProjects = await listProjectIds();

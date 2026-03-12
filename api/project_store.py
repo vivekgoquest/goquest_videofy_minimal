@@ -47,6 +47,9 @@ class ProjectStore:
             "working",
             "working/analysis",
             "working/analysis/frames",
+            "working/generated-images",
+            "working/generated-prompts",
+            "working/image-generation",
             "working/uploads",
             "working/audio",
             "output",
@@ -101,6 +104,15 @@ class ProjectStore:
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2, ensure_ascii=False)
+        return target
+
+    def save_bytes(self, project_id: str, rel_path: str, data: bytes) -> Path:
+        self.ensure_layout(project_id)
+        target = (self.project_path(project_id) / rel_path).resolve()
+        if not str(target).startswith(str(self.project_path(project_id))):
+            raise ProjectStoreError(f"Unsafe write path '{rel_path}'")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
         return target
 
     def load_json(self, project_id: str, rel_path: str) -> dict:

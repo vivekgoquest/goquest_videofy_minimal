@@ -4,8 +4,56 @@
     "manuscriptModel": "gpt-4o",
     "mediaModel": "gpt-4o"
   },
+  "gemini": {
+    "manuscriptModel": "gemini-2.5-flash",
+    "mediaModel": "gemini-2.5-flash",
+    "promptBuilderModel": "gemini-2.5-flash"
+  },
+  "llm": {
+    "defaultProvider": "openai",
+    "nodes": {
+      "scriptGeneration": {
+        "provider": "openai"
+      },
+      "imageDescription": {
+        "provider": "openai"
+      },
+      "assetPlacement": {
+        "provider": "openai"
+      },
+      "imagePromptBuilder": {
+        "provider": "openai"
+      }
+    }
+  },
+  "imageGeneration": {
+    "enabled": false,
+    "provider": "openai",
+    "promptBuilderModel": "",
+    "variants": 1,
+    "preferGenerated": true,
+    "prompts": {
+      "briefPrompt": "Create a single still image for a narrative explainer video segment. The image should feel intentional, editorial, and cinematic rather than like generic stock art.",
+      "openaiPromptBuilder": "You create XML-style render prompts for OpenAI image generation. Convert the provided story context into a concrete still-image prompt with these sections: scene, setting, composition, lighting, color_palette, style, negative_constraints. Keep every field visual and physically observable. Prefer editorial illustration or stylized realism over fake photojournalism. Return concise, specific details that can be rendered in one still image.",
+      "nanobananaPromptBuilder": "You write production-ready prompts for Nano Banana image generation. Convert the provided story context into a natural-language prompt that clearly states the subject, environment, composition, lighting, palette, and rendering style. Keep it cinematic, emotionally direct, and suitable for a single still frame in a vertical explainer video. Avoid XML markup and avoid documentary claims that the image is a real photograph."
+    },
+    "openai": {
+      "model": "gpt-5-mini",
+      "size": "1024x1536",
+      "quality": "high",
+      "background": "opaque"
+    },
+    "nanobanana": {
+      "model": "gemini-2.5-flash-image-preview",
+      "aspectRatio": "9:16",
+      "thinkingBudget": "low"
+    }
+  },
   "options": {
     "segmentPauseSeconds": 0.4
+  },
+  "audio": {
+    "tts": "google"
   },
   "exportDefaults": {
     "exportType": "Vertical",
@@ -16,12 +64,9 @@
   },
   "people": {
     "default": {
-      "voice": "h9K1sOblwDPp0OVDDPUJ",
-      "model_id": "eleven_turbo_v2_5",
-      "stability": 0.5,
-      "similarity_boost": 0.8,
-      "style": 0,
-      "use_speaker_boost": true
+      "voice": "Kore",
+      "model_id": "gemini-2.5-pro-preview-tts",
+      "instructions": "Deliver a thoughtful, cinematic explainer narration with clear pacing and confident emphasis."
     }
   },
   "prompts": {

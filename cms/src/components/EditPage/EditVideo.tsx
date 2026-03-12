@@ -211,7 +211,7 @@ const EditVideo = ({
       <Alert
         className="mb-4"
         type="info"
-        message="External video provider integrations are disabled in minimal mode. Use local files or direct URLs."
+        title="External video provider integrations are disabled in minimal mode. Use local files or direct URLs."
       />
 
       <Typography.Text strong>Replace video by URL</Typography.Text>

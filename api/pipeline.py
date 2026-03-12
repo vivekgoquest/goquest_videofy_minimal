@@ -9,10 +9,13 @@ from uuid import uuid4
 
 from .asset_analysis import AnalysisInputAsset, AssetAnalysisService, AssetAnalysisResult
 from .config_resolver import ConfigResolver, ResolvedConfig
+from .image_generation_service import GeneratedImageAsset, ImageGenerationService
 from .llm_service import LLMService
 from .project_store import ProjectStore, ProjectStoreError
 from .schemas import (
     ArticleInput,
+    GenerateImageGenerationOverride,
+    GenerateLLMOverride,
     Manuscript,
     ManuscriptMeta,
     MediaAssetImage,
@@ -21,7 +24,7 @@ from .schemas import (
     TextLine,
 )
 from .settings import Settings
-from .tts_service import ElevenLabsService
+from .tts_service import TTSService
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +57,10 @@ class PipelineService:
         settings: Settings,
         store: ProjectStore,
         llm_service: LLMService,
-        tts_service: ElevenLabsService,
+        tts_service: TTSService,
         config_resolver: ConfigResolver,
         asset_analysis_service: AssetAnalysisService,
+        image_generation_service: ImageGenerationService | None = None,
     ):
         self.settings = settings
         self.store = store
@@ -64,6 +68,10 @@ class PipelineService:
         self.tts_service = tts_service
         self.config_resolver = config_resolver
         self.asset_analysis_service = asset_analysis_service
+        self.image_generation_service = image_generation_service or ImageGenerationService(
+            settings=settings,
+            store=store,
+        )
 
     def _asset_url(self, project_id: str, project_relative_path: str) -> str:
         return f"{self.settings.app_base_url}/projects/{project_id}/files/{project_relative_path}"
@@ -96,7 +104,38 @@ class PipelineService:
             title=article.title,
             system_prompt=script_prompt,
             model_override=resolved_config.manuscript_model,
+            provider=resolved_config.llm.script_generation.provider,
         )
+
+    def _override_payload(
+        self,
+        override: GenerateLLMOverride | GenerateImageGenerationOverride | dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if override is None:
+            return None
+        if isinstance(override, dict):
+            return override or None
+        payload = override.model_dump(mode="json", exclude_none=True)
+        return payload or None
+
+    def _generated_assets_to_analysis_assets(
+        self,
+        project_id: str,
+        generated_assets: list[GeneratedImageAsset],
+    ) -> list[AnalysisInputAsset]:
+        analysis_assets: list[AnalysisInputAsset] = []
+        for asset in generated_assets:
+            analysis_assets.append(
+                AnalysisInputAsset(
+                    asset_id=asset.asset_id,
+                    type="image",
+                    rel_path=asset.rel_path,
+                    local_path=self.store.resolve_asset_path(project_id, asset.rel_path),
+                    url=asset.url,
+                    byline=asset.byline,
+                )
+            )
+        return analysis_assets
 
     def _build_analysis_input_assets(
         self,
@@ -252,19 +291,38 @@ class PipelineService:
         analysis_result: AssetAnalysisResult,
         analysis_assets_by_id: dict[str, dict[str, Any]],
         default_camera_movements: list[str],
+        generated_asset_ids_by_line: dict[int, list[str]],
+        prefer_generated: bool,
     ) -> list[Segment]:
         segments: list[Segment] = []
         next_video_scene_index_by_asset_id: dict[str, int] = {}
 
         for index, script_line in enumerate(script_lines):
             selected_media_assets: list[MediaAssetImage | MediaAssetVideo] = []
+            preferred_generated_asset_ids = generated_asset_ids_by_line.get(index, [])
             placed_asset_id = (
                 analysis_result.placement_asset_ids[index]
                 if index < len(analysis_result.placement_asset_ids)
                 else None
             )
+            generated_media_assets: list[MediaAssetImage | MediaAssetVideo] = []
 
-            if placed_asset_id and placed_asset_id in analysis_assets_by_id:
+            for generated_asset_id in preferred_generated_asset_ids:
+                if generated_asset_id not in analysis_assets_by_id:
+                    continue
+                preferred_analysis_asset = analysis_assets_by_id[generated_asset_id]
+                preferred_media_asset = self._map_analysis_asset_to_media_asset(
+                    project_id=project_id,
+                    analysis_asset=preferred_analysis_asset,
+                    video_scene_index=0,
+                )
+                if preferred_media_asset is not None:
+                    generated_media_assets.append(preferred_media_asset)
+
+            if prefer_generated and generated_media_assets:
+                selected_media_assets = generated_media_assets
+
+            if not selected_media_assets and placed_asset_id and placed_asset_id in analysis_assets_by_id:
                 placed_analysis_asset = analysis_assets_by_id[placed_asset_id]
                 video_scene_index: int | None = None
                 video_scenes = placed_analysis_asset.get("videoScenes")
@@ -280,7 +338,9 @@ class PipelineService:
                 )
                 if mapped_media_asset is not None:
                     selected_media_assets = [mapped_media_asset]
-            elif analysis_result.assets:
+            elif not selected_media_assets and generated_media_assets:
+                selected_media_assets = generated_media_assets
+            elif not selected_media_assets and analysis_result.assets:
                 fallback_analysis_asset = analysis_result.assets[index % len(analysis_result.assets)]
                 fallback_media_asset = self._map_analysis_asset_to_media_asset(
                     project_id=project_id,
@@ -323,12 +383,57 @@ class PipelineService:
                 "manuscriptModel": resolved_config.manuscript_model,
                 "openaiModel": resolved_config.manuscript_model,
                 "mediaModel": resolved_config.media_model,
+                "llm": {
+                    "defaultProvider": resolved_config.llm.default_provider,
+                    "nodes": {
+                        "scriptGeneration": {
+                            "provider": resolved_config.llm.script_generation.provider,
+                            "model": resolved_config.llm.script_generation.model,
+                        },
+                        "imageDescription": {
+                            "provider": resolved_config.llm.image_description.provider,
+                            "model": resolved_config.llm.image_description.model,
+                        },
+                        "assetPlacement": {
+                            "provider": resolved_config.llm.asset_placement.provider,
+                            "model": resolved_config.llm.asset_placement.model,
+                        },
+                        "imagePromptBuilder": {
+                            "provider": resolved_config.llm.image_prompt_builder.provider,
+                            "model": resolved_config.llm.image_prompt_builder.model,
+                        },
+                    },
+                },
+                "imageGeneration": {
+                    "enabled": resolved_config.image_generation.enabled,
+                    "provider": resolved_config.image_generation.provider,
+                    "promptBuilderModel": resolved_config.image_generation.prompt_builder_model,
+                    "variants": resolved_config.image_generation.variants,
+                    "preferGenerated": resolved_config.image_generation.prefer_generated,
+                    "prompts": {
+                        "briefPrompt": resolved_config.image_generation.brief_prompt,
+                        "openaiPromptBuilder": resolved_config.image_generation.openai_prompt_builder,
+                        "nanobananaPromptBuilder": resolved_config.image_generation.nanobanana_prompt_builder,
+                    },
+                    "openai": {
+                        "model": resolved_config.image_generation.openai.model,
+                        "size": resolved_config.image_generation.openai.size,
+                        "quality": resolved_config.image_generation.openai.quality,
+                    },
+                    "nanobanana": {
+                        "model": resolved_config.image_generation.nanobanana.model,
+                        "aspectRatio": resolved_config.image_generation.nanobanana.aspect_ratio,
+                        "thinkingBudget": resolved_config.image_generation.nanobanana.thinking_budget,
+                    },
+                },
                 "voiceId": resolved_config.voice_id,
                 "ttsModelId": resolved_config.tts_model_id,
                 "segmentPauseSeconds": resolved_config.segment_pause_seconds,
                 "player": resolved_config.player,
                 "analysis": {
+                    "descriptionProvider": resolved_config.llm.image_description.provider,
                     "descriptionModel": analysis_result.description_model,
+                    "placementProvider": resolved_config.llm.asset_placement.provider,
                     "placementModel": analysis_result.placement_model,
                     "hotspotProvider": analysis_result.hotspot_provider,
                     "usedFallbackPlacement": analysis_result.used_fallback_placement,
@@ -340,20 +445,35 @@ class PipelineService:
         self,
         project_id: str,
         script_prompt_override: str | None = None,
+        llm_override: GenerateLLMOverride | dict[str, Any] | None = None,
+        image_generation_override: GenerateImageGenerationOverride | dict[str, Any] | None = None,
     ) -> Manuscript:
         logger.info("[pipeline:%s] Manuscript generation started", project_id)
         self.store.ensure_layout(project_id)
-        logger.info("[pipeline:%s] Step 1/7: Resolving config", project_id)
+        logger.info("[pipeline:%s] Step 1/8: Resolving config", project_id)
         generation_manifest = self.store.load_generation_manifest(project_id)
-        resolved_config = self.config_resolver.resolve(generation_manifest)
+        resolved_config = self.config_resolver.resolve(
+            generation_manifest,
+            llm_override=self._override_payload(llm_override),
+            image_generation_override=self._override_payload(image_generation_override),
+        )
         logger.info(
-            "[pipeline:%s] Config resolved (brand=%s, model=%s)",
+            "[pipeline:%s] Config resolved (brand=%s, script=%s/%s, describe=%s/%s, placement=%s/%s, image_builder=%s/%s, image_enabled=%s, image_provider=%s)",
             project_id,
             generation_manifest.brandId,
-            resolved_config.manuscript_model,
+            resolved_config.llm.script_generation.provider,
+            resolved_config.llm.script_generation.model,
+            resolved_config.llm.image_description.provider,
+            resolved_config.llm.image_description.model,
+            resolved_config.llm.asset_placement.provider,
+            resolved_config.llm.asset_placement.model,
+            resolved_config.llm.image_prompt_builder.provider,
+            resolved_config.llm.image_prompt_builder.model,
+            resolved_config.image_generation.enabled,
+            resolved_config.image_generation.provider,
         )
 
-        logger.info("[pipeline:%s] Step 2/7: Loading article", project_id)
+        logger.info("[pipeline:%s] Step 2/8: Loading article", project_id)
         article = self.store.load_article(project_id)
         logger.info(
             "[pipeline:%s] Article loaded (images=%d, videos=%d, has_script_lines=%s)",
@@ -363,7 +483,7 @@ class PipelineService:
             bool(article.script_lines),
         )
 
-        logger.info("[pipeline:%s] Step 3/7: Resolving script lines", project_id)
+        logger.info("[pipeline:%s] Step 3/8: Resolving script lines", project_id)
         script_lines = self._resolve_script_lines(
             article=article,
             resolved_config=resolved_config,
@@ -375,7 +495,7 @@ class PipelineService:
             len(script_lines),
         )
 
-        logger.info("[pipeline:%s] Step 4/7: Preparing analysis input assets", project_id)
+        logger.info("[pipeline:%s] Step 4/8: Preparing analysis input assets", project_id)
         analysis_input_assets = self._build_analysis_input_assets(project_id=project_id, article=article)
         logger.info(
             "[pipeline:%s] Analysis input prepared (assets=%d)",
@@ -383,14 +503,45 @@ class PipelineService:
             len(analysis_input_assets),
         )
 
-        logger.info("[pipeline:%s] Step 5/7: Running asset analysis", project_id)
+        generated_asset_ids_by_line: dict[int, list[str]] = {}
+        if resolved_config.image_generation.enabled:
+            logger.info("[pipeline:%s] Step 5/8: Generating AI images", project_id)
+            generated_assets = self.image_generation_service.generate_for_script_lines(
+                project_id=project_id,
+                article=article,
+                script_lines=script_lines,
+                resolved_config=resolved_config,
+            )
+            generated_analysis_assets = self._generated_assets_to_analysis_assets(
+                project_id=project_id,
+                generated_assets=generated_assets,
+            )
+            for asset in generated_assets:
+                generated_asset_ids_by_line.setdefault(asset.line_index, []).append(
+                    asset.asset_id
+                )
+            if resolved_config.image_generation.prefer_generated:
+                analysis_input_assets = generated_analysis_assets + analysis_input_assets
+            else:
+                analysis_input_assets.extend(generated_analysis_assets)
+            logger.info(
+                "[pipeline:%s] AI image generation completed (generated_assets=%d, total_assets=%d)",
+                project_id,
+                len(generated_analysis_assets),
+                len(analysis_input_assets),
+            )
+
+        logger.info("[pipeline:%s] Step 6/8: Running asset analysis", project_id)
         analysis_result = self.asset_analysis_service.analyze(
             project_id=project_id,
             script_lines=script_lines,
             input_assets=analysis_input_assets,
             describe_prompt=resolved_config.describe_images_prompt,
             placement_prompt=resolved_config.placement_prompt,
-            media_model=resolved_config.media_model,
+            describe_provider=resolved_config.llm.image_description.provider,
+            describe_model=resolved_config.llm.image_description.model,
+            placement_provider=resolved_config.llm.asset_placement.provider,
+            placement_model=resolved_config.llm.asset_placement.model,
         )
         logger.info(
             "[pipeline:%s] Asset analysis completed (assets=%d, hotspot_provider=%s)",
@@ -399,7 +550,7 @@ class PipelineService:
             analysis_result.hotspot_provider,
         )
 
-        logger.info("[pipeline:%s] Step 6/7: Mapping media assets", project_id)
+        logger.info("[pipeline:%s] Step 7/8: Mapping media assets", project_id)
         analysis_assets_by_id, global_media_assets = self._build_global_media_assets(
             project_id=project_id,
             analysis_result=analysis_result,
@@ -418,6 +569,8 @@ class PipelineService:
             analysis_result=analysis_result,
             analysis_assets_by_id=analysis_assets_by_id,
             default_camera_movements=default_camera_movements,
+            generated_asset_ids_by_line=generated_asset_ids_by_line,
+            prefer_generated=resolved_config.image_generation.prefer_generated,
         )
         logger.info(
             "[pipeline:%s] Segments built (segments=%d)",
@@ -446,7 +599,7 @@ class PipelineService:
             analysis_result=analysis_result,
         )
         logger.info(
-            "[pipeline:%s] Step 7/7: Saved manuscript outputs",
+            "[pipeline:%s] Step 8/8: Saved manuscript outputs",
             project_id,
         )
         logger.info("[pipeline:%s] Manuscript generation finished", project_id)

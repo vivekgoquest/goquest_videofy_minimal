@@ -141,7 +141,7 @@ const EditConfig: React.FC = () => {
               />
               {state.validationError && (
                 <Alert
-                  message={state.validationError}
+                  title={state.validationError}
                   type="error"
                   showIcon
                   style={{ marginBottom: "1rem" }}
@@ -149,7 +149,7 @@ const EditConfig: React.FC = () => {
               )}
               {state.saveSuccessMessage && (
                 <Alert
-                  message={state.saveSuccessMessage}
+                  title={state.saveSuccessMessage}
                   type="success"
                   showIcon
                   closable
@@ -205,7 +205,7 @@ const EditConfig: React.FC = () => {
 
               {projectAssetsError && (
                 <Alert
-                  message={`Failed to load project assets: ${projectAssetsError.message}`}
+                  title={`Failed to load project assets: ${projectAssetsError.message}`}
                   type="error"
                   style={{ marginTop: "1rem", marginBottom: "1rem" }}
                   showIcon

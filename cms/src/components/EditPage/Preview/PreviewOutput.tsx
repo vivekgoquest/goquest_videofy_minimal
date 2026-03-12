@@ -10,7 +10,7 @@ import ErrorCard from "./ErrorCard";
 import LoadingCard from "./LoadingCard";
 import { Tab, useGlobalState } from "@/state/globalState";
 import { DesktopOutlined, MobileOutlined } from "@ant-design/icons";
-import { Button, Segmented, Tooltip } from "antd";
+import { Button, Empty, Segmented, Tooltip } from "antd";
 import DownloadModal from "./DownloadModal";
 
 type Result = z.infer<typeof processedManuscriptSchema>;
@@ -130,7 +130,14 @@ const PreviewOutput = ({ tabs }: { tabs: Tab[] }) => {
 
   return (
     <div className="top-0 sticky flex flex-col w-full">
-      {state.error && !state.updating && !state.loading ? (
+      {!tabs.length ? (
+        <div className="flex justify-center items-center min-h-[50vh]">
+          <Empty
+            description="This project has no manuscript yet. Add an article to start building the video."
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        </div>
+      ) : state.error && !state.updating && !state.loading ? (
         <ErrorCard errorMessage={state.error} />
       ) : !processedManuscripts.length && (state.updating || state.loading) ? (
         <LoadingCard />
@@ -178,13 +185,13 @@ const PreviewOutput = ({ tabs }: { tabs: Tab[] }) => {
         </Tooltip>
         <Button
           onClick={updatePreview}
-          disabled={state.loading || state.updating}
+          disabled={!tabs.length || state.loading || state.updating}
           type="primary"
         >
           Update
         </Button>
         <Button
-          disabled={state.loading || state.updating}
+          disabled={!tabs.length || state.loading || state.updating}
           hidden={!!state.error || !processedManuscripts.length}
           type="primary"
           onClick={() => {

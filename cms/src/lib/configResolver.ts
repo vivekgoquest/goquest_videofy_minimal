@@ -8,6 +8,11 @@ import {
   readJson,
 } from "@/lib/projectFiles";
 
+type ImageGenerationConfig = NonNullable<Config["image_generation"]>;
+type LLMConfig = NonNullable<Config["llm"]>;
+type LLMNodeKey = keyof LLMConfig["nodes"];
+type LLMNodeConfig = NonNullable<LLMConfig["nodes"][LLMNodeKey]>;
+
 function deepMerge(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...base };
   for (const [k, v] of Object.entries(patch)) {
@@ -77,6 +82,7 @@ export async function resolveConfigForProject(
   const brandPeople = (brand.people || {}) as Record<string, unknown>;
   const people = brandPeople;
   const defaultPerson = ((people.default || {}) as Record<string, unknown>);
+  const audio = (merged.audio || {}) as Record<string, unknown>;
   const options = (merged.options || {}) as Record<string, unknown>;
 
   config.manuscript.script_prompt =
@@ -85,6 +91,207 @@ export async function resolveConfigForProject(
     (prompts.placementPrompt as string) || config.manuscript.placement_prompt;
   config.manuscript.describe_images_prompt =
     (prompts.describeImagesPrompt as string) || config.manuscript.describe_images_prompt;
+
+  const imageGeneration = (merged.imageGeneration || {}) as Record<string, unknown>;
+  const imageGenerationPrompts = (imageGeneration.prompts || {}) as Record<string, unknown>;
+  const openaiImageGeneration = (imageGeneration.openai || {}) as Record<string, unknown>;
+  const nanobananaImageGeneration = (imageGeneration.nanobanana || {}) as Record<string, unknown>;
+  const llm = (merged.llm || {}) as Record<string, unknown>;
+  const llmNodes = (llm.nodes || {}) as Record<string, unknown>;
+  const openai = (merged.openai || {}) as Record<string, unknown>;
+  const gemini = (merged.gemini || {}) as Record<string, unknown>;
+
+  if (config.llm) {
+    const defaultProvider =
+      (llm.defaultProvider as LLMConfig["default_provider"]) ||
+      (llm.default_provider as LLMConfig["default_provider"]);
+    if (defaultProvider === "openai" || defaultProvider === "gemini") {
+      config.llm.default_provider = defaultProvider;
+    }
+
+    const readNodeObject = (camelKey: string, snakeKey: string) => {
+      const camelValue = llmNodes[camelKey];
+      if (camelValue && typeof camelValue === "object" && !Array.isArray(camelValue)) {
+        return camelValue as Record<string, unknown>;
+      }
+      const snakeValue = llmNodes[snakeKey];
+      if (snakeValue && typeof snakeValue === "object" && !Array.isArray(snakeValue)) {
+        return snakeValue as Record<string, unknown>;
+      }
+      return {};
+    };
+
+    const applyNode = (
+      nodeKey: LLMNodeKey,
+      rawNode: Record<string, unknown>,
+      fallbackModels: {
+        openai?: string;
+        gemini?: string;
+      }
+    ) => {
+      const currentNode = (config.llm?.nodes[nodeKey] || {}) as LLMNodeConfig;
+      const nextNode: LLMNodeConfig = { ...currentNode };
+
+      if (rawNode.provider === "openai" || rawNode.provider === "gemini") {
+        nextNode.provider = rawNode.provider;
+      }
+
+      if (typeof rawNode.model === "string" && rawNode.model) {
+        nextNode.model = rawNode.model;
+      } else {
+        const provider = nextNode.provider || config.llm?.default_provider || "openai";
+        const fallbackModel =
+          provider === "gemini" ? fallbackModels.gemini : fallbackModels.openai;
+        if (typeof fallbackModel === "string" && fallbackModel) {
+          nextNode.model = fallbackModel;
+        }
+      }
+
+      config.llm!.nodes[nodeKey] = nextNode;
+    };
+
+    const legacyPromptBuilderModel =
+      typeof imageGeneration.promptBuilderModel === "string"
+        ? imageGeneration.promptBuilderModel
+        : undefined;
+
+    applyNode(
+      "script_generation",
+      readNodeObject("scriptGeneration", "script_generation"),
+      {
+        openai:
+          typeof openai.manuscriptModel === "string" ? openai.manuscriptModel : "gpt-4o-mini",
+        gemini:
+          typeof gemini.manuscriptModel === "string"
+            ? gemini.manuscriptModel
+            : "gemini-2.5-flash",
+      }
+    );
+    applyNode(
+      "image_description",
+      readNodeObject("imageDescription", "image_description"),
+      {
+        openai:
+          typeof openai.mediaModel === "string"
+            ? openai.mediaModel
+            : typeof openai.manuscriptModel === "string"
+              ? openai.manuscriptModel
+              : "gpt-4o-mini",
+        gemini:
+          typeof gemini.mediaModel === "string"
+            ? gemini.mediaModel
+            : typeof gemini.manuscriptModel === "string"
+              ? gemini.manuscriptModel
+              : "gemini-2.5-flash",
+      }
+    );
+    applyNode(
+      "asset_placement",
+      readNodeObject("assetPlacement", "asset_placement"),
+      {
+        openai:
+          typeof openai.mediaModel === "string"
+            ? openai.mediaModel
+            : typeof openai.manuscriptModel === "string"
+              ? openai.manuscriptModel
+              : "gpt-4o-mini",
+        gemini:
+          typeof gemini.mediaModel === "string"
+            ? gemini.mediaModel
+            : typeof gemini.manuscriptModel === "string"
+              ? gemini.manuscriptModel
+              : "gemini-2.5-flash",
+      }
+    );
+    applyNode(
+      "image_prompt_builder",
+      readNodeObject("imagePromptBuilder", "image_prompt_builder"),
+      {
+        openai: legacyPromptBuilderModel || "gpt-5-mini",
+        gemini:
+          (typeof gemini.promptBuilderModel === "string" && gemini.promptBuilderModel) ||
+          legacyPromptBuilderModel ||
+          "gemini-2.5-flash",
+      }
+    );
+  }
+
+  if (typeof imageGeneration.enabled === "boolean" && config.image_generation) {
+    config.image_generation.enabled = imageGeneration.enabled;
+  }
+  if (typeof imageGeneration.provider === "string" && config.image_generation) {
+    config.image_generation.provider =
+      imageGeneration.provider as ImageGenerationConfig["provider"];
+  }
+  if (typeof imageGeneration.promptBuilderModel === "string" && config.image_generation) {
+    config.image_generation.prompt_builder_model = imageGeneration.promptBuilderModel;
+  }
+  if (typeof imageGeneration.variants === "number" && config.image_generation) {
+    config.image_generation.variants = imageGeneration.variants;
+  }
+  if (typeof imageGeneration.preferGenerated === "boolean" && config.image_generation) {
+    config.image_generation.prefer_generated = imageGeneration.preferGenerated;
+  }
+  if (typeof imageGenerationPrompts.briefPrompt === "string" && config.image_generation) {
+    config.image_generation.prompts.brief_prompt = imageGenerationPrompts.briefPrompt;
+  }
+  if (
+    typeof imageGenerationPrompts.openaiPromptBuilder === "string" &&
+    config.image_generation
+  ) {
+    config.image_generation.prompts.openai_prompt_builder =
+      imageGenerationPrompts.openaiPromptBuilder;
+  }
+  if (
+    typeof imageGenerationPrompts.nanobananaPromptBuilder === "string" &&
+    config.image_generation
+  ) {
+    config.image_generation.prompts.nanobanana_prompt_builder =
+      imageGenerationPrompts.nanobananaPromptBuilder;
+  }
+
+  if (config.image_generation) {
+    config.image_generation.openai = {
+      ...config.image_generation.openai,
+    ...(typeof openaiImageGeneration.model === "string"
+      ? { model: openaiImageGeneration.model }
+      : {}),
+    ...(typeof openaiImageGeneration.size === "string"
+      ? { size: openaiImageGeneration.size as NonNullable<ImageGenerationConfig["openai"]>["size"] }
+      : {}),
+    ...(typeof openaiImageGeneration.quality === "string"
+      ? {
+          quality:
+            openaiImageGeneration.quality as NonNullable<ImageGenerationConfig["openai"]>["quality"],
+        }
+      : {}),
+    ...(typeof openaiImageGeneration.background === "string"
+      ? {
+          background:
+            openaiImageGeneration.background as NonNullable<ImageGenerationConfig["openai"]>["background"],
+        }
+      : {}),
+    };
+
+    config.image_generation.nanobanana = {
+      ...config.image_generation.nanobanana,
+    ...(typeof nanobananaImageGeneration.model === "string"
+      ? { model: nanobananaImageGeneration.model }
+      : {}),
+    ...(typeof nanobananaImageGeneration.aspectRatio === "string"
+      ? {
+          aspect_ratio:
+            nanobananaImageGeneration.aspectRatio as NonNullable<ImageGenerationConfig["nanobanana"]>["aspect_ratio"],
+        }
+      : {}),
+    ...(typeof nanobananaImageGeneration.thinkingBudget === "string"
+      ? {
+          thinking_budget:
+            nanobananaImageGeneration.thinkingBudget as NonNullable<ImageGenerationConfig["nanobanana"]>["thinking_budget"],
+        }
+      : {}),
+    };
+  }
 
   if (brandPeople && typeof brandPeople === "object") {
     config.people = deepMerge(
@@ -95,6 +302,14 @@ export async function resolveConfigForProject(
 
   if (typeof defaultPerson.voice === "string" && defaultPerson.voice) {
     config.people.default.voice = defaultPerson.voice;
+  }
+  if (typeof defaultPerson.model_id === "string" && defaultPerson.model_id) {
+    config.people.default.model_id = defaultPerson.model_id;
+  } else if (typeof defaultPerson.modelId === "string" && defaultPerson.modelId) {
+    config.people.default.model_id = defaultPerson.modelId;
+  }
+  if (typeof defaultPerson.instructions === "string" && defaultPerson.instructions) {
+    config.people.default.instructions = defaultPerson.instructions;
   }
 
   if (typeof defaultPerson.stability === "number") {
@@ -112,6 +327,9 @@ export async function resolveConfigForProject(
 
   if (typeof options.segmentPauseSeconds === "number") {
     config.audio.segment_pause = options.segmentPauseSeconds;
+  }
+  if (audio.tts === "google") {
+    config.audio.tts = "google";
   }
 
   if (merged.player && typeof merged.player === "object") {

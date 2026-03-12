@@ -30,16 +30,96 @@ const manuscriptConfigSchema = z.object({
   describe_images_prompt: z.string(),
 });
 
+const llmProviderSchema = z.union([z.literal("openai"), z.literal("gemini")]);
+
+const llmNodeSchema = z.object({
+  provider: llmProviderSchema.optional(),
+  model: z.string().optional(),
+});
+
+const llmSchema = z.object({
+  default_provider: llmProviderSchema,
+  nodes: z.object({
+    script_generation: llmNodeSchema.optional(),
+    image_description: llmNodeSchema.optional(),
+    asset_placement: llmNodeSchema.optional(),
+    image_prompt_builder: llmNodeSchema.optional(),
+  }),
+});
+
+const imageGenerationProviderSchema = z.union([
+  z.literal("openai"),
+  z.literal("nanobanana"),
+]);
+
+const imageGenerationPromptsSchema = z.object({
+  brief_prompt: z.string().optional(),
+  openai_prompt_builder: z.string(),
+  nanobanana_prompt_builder: z.string(),
+});
+
+const openAiImageGenerationSchema = z.object({
+  model: z.string().optional(),
+  size: z
+    .union([
+      z.literal("auto"),
+      z.literal("1024x1024"),
+      z.literal("1536x1024"),
+      z.literal("1024x1536"),
+    ])
+    .optional(),
+  quality: z
+    .union([
+      z.literal("auto"),
+      z.literal("low"),
+      z.literal("medium"),
+      z.literal("high"),
+    ])
+    .optional(),
+  background: z
+    .union([z.literal("auto"), z.literal("transparent"), z.literal("opaque")])
+    .optional(),
+});
+
+const nanobananaImageGenerationSchema = z.object({
+  model: z.string().optional(),
+  aspect_ratio: z
+    .union([z.literal("1:1"), z.literal("9:16"), z.literal("16:9")])
+    .optional(),
+  thinking_budget: z
+    .union([
+      z.literal("none"),
+      z.literal("low"),
+      z.literal("medium"),
+      z.literal("high"),
+    ])
+    .optional(),
+});
+
+const imageGenerationSchema = z.object({
+  enabled: z.boolean(),
+  provider: imageGenerationProviderSchema,
+  prompt_builder_model: z.string().optional(),
+  variants: z.number().int().min(1).max(4),
+  prefer_generated: z.boolean(),
+  prompts: imageGenerationPromptsSchema,
+  openai: openAiImageGenerationSchema.optional(),
+  nanobanana: nanobananaImageGenerationSchema.optional(),
+});
+
 const personSchema = z.object({
   voice: z.string(),
-  stability: z.number(),
-  similarity_boost: z.number(),
-  style: z.number(),
-  use_speaker_boost: z.boolean(),
+  model_id: z.string().optional(),
+  modelId: z.string().optional(),
+  instructions: z.string().optional(),
+  stability: z.number().optional(),
+  similarity_boost: z.number().optional(),
+  style: z.number().optional(),
+  use_speaker_boost: z.boolean().optional(),
 });
 
 const audioSchema = z.object({
-  tts: z.union([z.literal("elevenlabs"), z.literal("google")]),
+  tts: z.literal("google"),
   background: backgroundSchema,
   sync_silence: z.number(),
   segment_pause: z.number(),
@@ -183,6 +263,8 @@ const configSchema = z.object({
   id: z.string(),
   people: peopleSchema,
   manuscript: manuscriptConfigSchema,
+  llm: llmSchema.optional(),
+  image_generation: imageGenerationSchema.optional(),
   graphics: graphicsSchema,
   audio: audioSchema,
   player: playerSchema.optional(),

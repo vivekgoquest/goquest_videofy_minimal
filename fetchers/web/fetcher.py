@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 import shutil
+import ssl
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -19,8 +20,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urljoin, urlparse
 from urllib.request import Request, urlopen
 
+import certifi
+
 REQUEST_TIMEOUT_SECONDS = 30
 USER_AGENT = "videofy-minimal-fetch-web/1.0"
+SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 
 class WebImportError(Exception):
@@ -554,7 +558,7 @@ def request_html(url: str, timeout: int) -> tuple[str, str, dict[str, str]]:
         method="GET",
     )
     try:
-        with urlopen(req, timeout=timeout) as response:
+        with urlopen(req, timeout=timeout, context=SSL_CONTEXT) as response:
             raw = response.read()
             final_url = response.geturl()
             headers = {k.lower(): v for k, v in response.headers.items()}
@@ -886,7 +890,7 @@ def _download_binary(url: str, target_file: Path, timeout: int, referer: str) ->
         },
         method="GET",
     )
-    with urlopen(req, timeout=timeout) as response:
+    with urlopen(req, timeout=timeout, context=SSL_CONTEXT) as response:
         content_type = response.headers.get("Content-Type")
         with tempfile.NamedTemporaryFile(delete=False, dir=target_file.parent) as tmp:
             while True:

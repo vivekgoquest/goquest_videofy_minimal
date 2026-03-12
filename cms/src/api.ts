@@ -57,6 +57,17 @@ export type BrandOption = {
   scriptPrompt: string;
 };
 
+function normalizeApiErrorMessage(message: string): string {
+  const htmlStart = message.search(/<!doctype|<html|<head|<body/i);
+  const withoutMarkup =
+    htmlStart >= 0 ? message.slice(0, htmlStart).trim().replace(/[:\s]+$/, "") : message;
+  const compact = withoutMarkup.replace(/\s+/g, " ").trim();
+  if (compact.length <= 320) {
+    return compact;
+  }
+  return `${compact.slice(0, 317)}...`;
+}
+
 export const getFetchers = async (): Promise<FetcherOption[]> => {
   const response = await axios.get<{ fetchers: FetcherOption[] }>("/api/fetchers");
   return response.data.fetchers;
@@ -65,8 +76,30 @@ export const getFetchers = async (): Promise<FetcherOption[]> => {
 export const runFetcherPlugin = async (
   payload: RunFetcherPayload
 ): Promise<RunFetcherResult> => {
-  const response = await axios.post<RunFetcherResult>("/api/fetchers", payload);
-  return response.data;
+  try {
+    const response = await axios.post<RunFetcherResult>("/api/fetchers", payload);
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const apiError = error.response?.data as
+        | { error?: unknown }
+        | string
+        | undefined;
+
+      if (typeof apiError === "string" && apiError.trim()) {
+        throw new Error(normalizeApiErrorMessage(apiError));
+      }
+      if (
+        apiError &&
+        typeof apiError === "object" &&
+        typeof apiError.error === "string" &&
+        apiError.error.trim()
+      ) {
+        throw new Error(normalizeApiErrorMessage(apiError.error));
+      }
+    }
+    throw error;
+  }
 };
 
 export const getBrands = async (): Promise<BrandOption[]> => {

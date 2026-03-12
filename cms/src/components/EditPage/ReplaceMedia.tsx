@@ -58,7 +58,7 @@ const ReplaceMedia = ({
           children: (
             <Alert
               type="info"
-              message="External media library integrations are disabled in minimal mode."
+              title="External media library integrations are disabled in minimal mode."
             />
           ),
         },
